@@ -33,10 +33,12 @@
         </label>
         <p id="crawl-file-status" class="crawl-status">No crawl loaded</p>
         <div id="crawl-summary" class="crawl-summary" hidden>
+          <span><b id="row-count">0</b> URLs read</span>
           <span><b id="source-count">0</b> broken pages</span>
           <i aria-hidden="true">→</i>
           <span><b id="target-count">0</b> live destinations</span>
-          <span><b id="signal-count">0</b> metadata signals found</span>
+          <span><b id="ignored-count">0</b> other statuses</span>
+          <span><b id="signal-count">0</b> metadata columns</span>
         </div>
       </div>
       <div class="controls">
@@ -54,7 +56,7 @@
         <button id="download" class="text-button" type="button">Download CSV</button>
       </div>
       <div class="table-wrap"><table><thead><tr><th>Broken URL</th><th>Best destination</th><th>Score</th><th>Strongest signal</th><th>Decision</th></tr></thead><tbody id="results"></tbody></table></div>
-      <p class="caution">A matching score measures URL similarity—not search intent. Manually review every medium or low-confidence recommendation before deploying it.</p>
+      <p class="caution">Every 404/410 receives its closest live URL. A low score still needs manual review: similarity does not guarantee matching search intent.</p>
     </section>
   </main>
   <footer><span>Open-source SEO utility</span><a href="https://github.com/KTG1/redirect-mapper" rel="noreferrer">View setup guide</a></footer>

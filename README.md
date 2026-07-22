@@ -27,7 +27,7 @@ Scores below the approval threshold are left without a destination. Close altern
 
 The `docs/` directory contains a private, browser-only version of the mapper. Enable **Settings → Pages → Deploy from branch**, select your default branch and `/docs`. CSV data never leaves the browser.
 
-The web interface accepts one crawl-export CSV. It recognizes common crawler headers such as `URL` or `Address`, `Status Code`, `Title 1`, `H1-1`, and `Meta Description`. Rows with 404/410 statuses become redirect sources; 2xx rows become eligible destinations. URL structure is the primary matching signal, supported by title, H1, and description similarity when those columns are present.
+The web interface accepts one complete crawl-export CSV. It recognizes common crawler headers such as `URL` or `Address`, `Status Code` or `Response Code`, `Title 1`, `H1-1`, and `Meta Description`. Comma-, semicolon-, and tab-delimited exports are supported. Rows with 404/410 statuses become redirect sources; 2xx rows become eligible destinations. Every broken URL receives its closest live candidate, with low scores flagged for manual review. URL structure is the primary matching signal, supported by title, H1, and description similarity when those columns are present.
 
 ## Production notes
 

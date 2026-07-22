@@ -1,21 +1,32 @@
 const $ = (id) => document.getElementById(id);
-let crawl = { sources: [], targets: [], columns: [] };
+let crawl = { sources: [], targets: [], all: [], ignored: 0, columns: [] };
 let latest = [];
 
 const ALIASES = {
-  url: ["url", "address", "page url", "page_url", "landing page"],
-  status: ["status", "status code", "status_code", "http status", "http status code"],
+  url: ["url", "address", "page url", "page_url", "landing page", "source url", "source_url", "uri"],
+  status: ["status", "status code", "status_code", "http status", "http status code", "response code", "response_code", "statuscode"],
   title: ["title", "title 1", "title tag", "page title", "meta title"],
   h1: ["h1", "h1-1", "h1 1", "heading 1"],
   description: ["meta description", "description", "meta description 1"],
 };
 
-function normalizeHeader(value) { return value.replace(/^\ufeff/, "").trim().toLowerCase(); }
+function normalizeHeader(value) { return value.replace(/^\ufeff/, "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "); }
 function columnIndex(headers, name) {
-  const aliases = ALIASES[name];
+  const aliases = ALIASES[name].map(normalizeHeader);
   return headers.findIndex(header => aliases.includes(header) || (name === "title" && header.startsWith("title ")) || (name === "h1" && /^h1(?:\s|$|-)/.test(header)));
 }
+function detectDelimiter(text) {
+  const firstLine = text.split(/\r?\n/, 1)[0] || "";
+  const counts = { ",": 0, ";": 0, "\t": 0 }; let quoted = false;
+  for (let i = 0; i < firstLine.length; i++) {
+    if (firstLine[i] === '"' && firstLine[i + 1] === '"') i++;
+    else if (firstLine[i] === '"') quoted = !quoted;
+    else if (!quoted && Object.prototype.hasOwnProperty.call(counts, firstLine[i])) counts[firstLine[i]]++;
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
 function csvRows(text) {
+  const delimiter = detectDelimiter(text);
   const rows = []; let row = [], cell = "", quoted = false;
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
@@ -24,7 +35,7 @@ function csvRows(text) {
       else if (char === '"') quoted = false;
       else cell += char;
     } else if (char === '"') quoted = true;
-    else if (char === ",") { row.push(cell); cell = ""; }
+    else if (char === delimiter) { row.push(cell); cell = ""; }
     else if (char === "\n") { row.push(cell); if (row.some(Boolean)) rows.push(row); row = []; cell = ""; }
     else if (char !== "\r") cell += char;
   }
@@ -40,7 +51,7 @@ function parseCrawl(text) {
   if (indexes.status < 0) throw new Error("Could not find a status-code column (for example Status Code). ");
   const pages = rows.slice(1).map(columns => ({
     url: (columns[indexes.url] || "").trim(),
-    status: Number.parseInt((columns[indexes.status] || "").trim(), 10),
+    status: Number.parseInt(((columns[indexes.status] || "").match(/\b[1-5]\d\d\b/) || [""])[0], 10),
     title: indexes.title >= 0 ? (columns[indexes.title] || "").trim() : "",
     h1: indexes.h1 >= 0 ? (columns[indexes.h1] || "").trim() : "",
     description: indexes.description >= 0 ? (columns[indexes.description] || "").trim() : "",
@@ -50,7 +61,7 @@ function parseCrawl(text) {
   const targets = unique.filter(page => page.status >= 200 && page.status < 300);
   if (!sources.length) throw new Error("No 404 or 410 rows were found.");
   if (!targets.length) throw new Error("No 2xx destination rows were found.");
-  return { sources, targets, columns: Object.entries(indexes).filter(([, index]) => index >= 0).map(([name]) => name) };
+  return { sources, targets, all: unique, ignored: unique.length - sources.length - targets.length, columns: Object.entries(indexes).filter(([, index]) => index >= 0).map(([name]) => name) };
 }
 function words(value) { return new Set((value.toLowerCase().match(/[a-z0-9]+/g) || []).filter(word => word.length > 1)); }
 function parts(page) {
@@ -90,15 +101,17 @@ function pageScore(source, target) {
 function escapeHtml(value) { const element = document.createElement("span"); element.textContent = value; return element.innerHTML; }
 function csvCell(value) { return `"${String(value).replaceAll('"', '""')}"`; }
 function renderSummary(fileName) {
+  $("row-count").textContent = crawl.all.length;
   $("source-count").textContent = crawl.sources.length; $("target-count").textContent = crawl.targets.length;
+  $("ignored-count").textContent = crawl.ignored;
   $("signal-count").textContent = crawl.columns.filter(column => ["title", "h1", "description"].includes(column)).length;
-  $("crawl-summary").hidden = false; $("crawl-file-status").textContent = `${fileName} · ${crawl.sources.length + crawl.targets.length} usable rows`;
+  $("crawl-summary").hidden = false; $("crawl-file-status").textContent = `${fileName} · ${crawl.all.length} valid URL rows read`;
   $("crawl-file-status").className = "crawl-status loaded";
 }
 async function importCrawl(file) {
   if (!file) return;
   try { crawl = parseCrawl(await file.text()); renderSummary(file.name); $("message").textContent = ""; }
-  catch (error) { crawl = { sources: [], targets: [], columns: [] }; $("crawl-summary").hidden = true; $("crawl-file-status").textContent = error.message; $("crawl-file-status").className = "crawl-status error"; $("crawl-file").value = ""; }
+  catch (error) { crawl = { sources: [], targets: [], all: [], ignored: 0, columns: [] }; $("crawl-summary").hidden = true; $("crawl-file-status").textContent = error.message; $("crawl-file-status").className = "crawl-status error"; $("crawl-file").value = ""; }
 }
 function mapPages() {
   if (!crawl.sources.length || !crawl.targets.length) { $("message").textContent = "Upload a crawl CSV before creating suggestions."; return; }
@@ -107,7 +120,7 @@ function mapPages() {
     const ranked = crawl.targets.map(target => ({ target, ...pageScore(source, target) })).sort((a, b) => b.score - a.score);
     const best = ranked[0], gap = best.score - (ranked[1]?.score || 0), score = Math.round(best.score * 1000) / 10;
     const confidence = score < minimum ? "review" : score >= 78 && gap >= .08 ? "high" : score >= 60 ? "medium" : "low";
-    return { source_url: source.url, source_status: source.status, destination_url: confidence === "review" ? "" : best.target.url, destination_status: best.target.status, score, strongest_signal: best.strongest, confidence };
+    return { source_url: source.url, source_status: source.status, destination_url: best.target.url, destination_status: best.target.status, score, strongest_signal: best.strongest, confidence };
   });
   $("results").innerHTML = latest.map(item => `<tr><td>${escapeHtml(item.source_url)}</td><td>${escapeHtml(item.destination_url) || "—"}</td><td class="score">${item.score}%</td><td>${escapeHtml(item.strongest_signal)}</td><td><span class="badge ${item.confidence}">${item.confidence}</span></td></tr>`).join("");
   $("message").textContent = ""; $("results-section").hidden = false; $("results-section").scrollIntoView({ behavior: "smooth" });
