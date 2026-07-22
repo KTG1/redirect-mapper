@@ -25,13 +25,25 @@
         <button id="example" class="text-button" type="button">Load example</button>
       </div>
       <div class="inputs">
-        <label>Broken URLs <span>One per line, or paste a CSV url column</span>
+        <div class="input-panel">
+          <div class="input-heading"><label for="sources">Broken URLs</label><span>One per line, or import a CSV</span></div>
+          <div class="upload-row">
+            <label class="upload-button" for="sources-file">Upload 404 CSV</label>
+            <input id="sources-file" class="file-input" type="file" accept=".csv,text/csv">
+            <span id="sources-file-status" class="file-status">No file selected</span>
+          </div>
           <textarea id="sources" placeholder="https://example.com/old-page"></textarea>
-        </label>
+        </div>
         <div class="route" aria-hidden="true"><span>404</span><i></i><b>301</b></div>
-        <label>Live destinations <span>One canonical 200 URL per line</span>
+        <div class="input-panel">
+          <div class="input-heading"><label for="targets">Live destinations</label><span>One canonical URL per line, or import a CSV</span></div>
+          <div class="upload-row">
+            <label class="upload-button" for="targets-file">Upload live CSV</label>
+            <input id="targets-file" class="file-input" type="file" accept=".csv,text/csv">
+            <span id="targets-file-status" class="file-status">No file selected</span>
+          </div>
           <textarea id="targets" placeholder="https://example.com/new-page"></textarea>
-        </label>
+        </div>
       </div>
       <div class="controls">
         <label class="threshold">Minimum score <output id="threshold-value">45</output>%
@@ -51,7 +63,7 @@
       <p class="caution">A matching score measures URL similarity—not search intent. Manually review every medium or low-confidence recommendation before deploying it.</p>
     </section>
   </main>
-  <footer><span>Open-source SEO utility</span><a href="https://github.com/" rel="noreferrer">View setup guide</a></footer>
+  <footer><span>Open-source SEO utility</span><a href="https://github.com/KTG1/redirect-mapper" rel="noreferrer">View setup guide</a></footer>
   <script src="app.js"></script>
 </body>
 </html>

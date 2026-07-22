@@ -27,6 +27,8 @@ Scores below the approval threshold are left without a destination. Close altern
 
 The `docs/` directory contains a private, browser-only version of the mapper. Enable **Settings → Pages → Deploy from branch**, select your default branch and `/docs`. CSV data never leaves the browser.
 
+The web interface accepts pasted URLs or direct CSV uploads for both 404 sources and live destinations. Uploaded files must contain a `url` column; quoted values and additional columns are supported.
+
 ## Production notes
 
 Prefer a single 301/308 hop directly to a canonical 200 URL. Avoid redirecting every missing page to the home page, soft-404 destinations, loops, and irrelevant matches. Preserve intentionally valuable query parameters and test generated rules in staging.
