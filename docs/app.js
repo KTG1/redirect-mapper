@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-let crawl = { sources: [], targets: [], all: [], ignored: 0, columns: [] };
+let crawl = { sources: [], targets: [], all: [], ignored: 0, malformed: [], columns: [] };
 let latest = [];
 
 const ALIASES = {
@@ -65,19 +65,28 @@ function parseCrawl(text) {
   if (headerRow < 0) throw new Error(`Could not identify URL and status columns. Found: ${fallbackHeaders.slice(0, 6).join(", ") || "no headers"}.`);
   const headers = rows[headerRow].map(normalizeHeader);
   const indexes = Object.fromEntries(Object.keys(ALIASES).map(name => [name, columnIndex(headers, name)]));
-  const pages = rows.slice(headerRow + 1).map(columns => ({
-    url: (columns[indexes.url] || "").trim(),
-    status: Number.parseInt(((columns[indexes.status] || "").match(/\b[1-5]\d\d\b/) || [""])[0], 10),
-    title: indexes.title >= 0 ? (columns[indexes.title] || "").trim() : "",
-    h1: indexes.h1 >= 0 ? (columns[indexes.h1] || "").trim() : "",
-    description: indexes.description >= 0 ? (columns[indexes.description] || "").trim() : "",
-  })).filter(page => /^https?:\/\//i.test(page.url) && Number.isFinite(page.status));
+  const pages = [], malformed = [];
+  rows.slice(headerRow + 1).forEach((columns, offset) => {
+    const rawUrl = (columns[indexes.url] || "").trim();
+    const rawStatus = (columns[indexes.status] || "").trim();
+    const status = Number.parseInt((rawStatus.match(/\b[1-5]\d\d\b/) || [""])[0], 10);
+    if (!rawUrl) return;
+    try {
+      const parsed = new URL(rawUrl);
+      if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) throw new Error("Not an absolute HTTP(S) URL");
+      decodeURIComponent(parsed.pathname);
+      if (!Number.isFinite(status)) return;
+      pages.push({ url: rawUrl, status, title: indexes.title >= 0 ? (columns[indexes.title] || "").trim() : "", h1: indexes.h1 >= 0 ? (columns[indexes.h1] || "").trim() : "", description: indexes.description >= 0 ? (columns[indexes.description] || "").trim() : "" });
+    } catch (error) {
+      malformed.push({ row: headerRow + offset + 2, url: rawUrl, status: rawStatus, reason: error instanceof URIError ? "Invalid percent encoding" : "Invalid absolute HTTP(S) URL" });
+    }
+  });
   const unique = [...new Map(pages.map(page => [page.url, page])).values()];
   const sources = unique.filter(page => page.status === 404 || page.status === 410);
   const targets = unique.filter(page => page.status >= 200 && page.status < 300);
   if (!sources.length) throw new Error("No 404 or 410 rows were found.");
   if (!targets.length) throw new Error("No 2xx destination rows were found.");
-  return { sources, targets, all: unique, ignored: unique.length - sources.length - targets.length, columns: Object.entries(indexes).filter(([, index]) => index >= 0).map(([name]) => name) };
+  return { sources, targets, all: unique, ignored: unique.length - sources.length - targets.length, malformed, columns: Object.entries(indexes).filter(([, index]) => index >= 0).map(([name]) => name) };
 }
 async function decodeCsvFile(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -168,14 +177,25 @@ function renderSummary(fileName) {
   $("row-count").textContent = crawl.all.length;
   $("source-count").textContent = crawl.sources.length; $("target-count").textContent = crawl.targets.length;
   $("ignored-count").textContent = crawl.ignored;
+  $("skipped-count").textContent = crawl.malformed.length;
   $("signal-count").textContent = crawl.columns.filter(column => ["title", "h1", "description"].includes(column)).length;
-  $("crawl-summary").hidden = false; $("crawl-file-status").textContent = `${fileName} · ${crawl.all.length} valid URL rows read`;
+  const skipped = crawl.malformed.length ? ` · ${crawl.malformed.length} malformed skipped` : "";
+  $("crawl-summary").hidden = false; $("crawl-file-status").textContent = `${fileName} · ${crawl.all.length} valid URL rows read${skipped}`;
   $("crawl-file-status").className = "crawl-status loaded";
 }
 async function importCrawl(file) {
   if (!file) return;
-  try { crawl = parseCrawl(await decodeCsvFile(file)); renderSummary(file.name); $("message").textContent = ""; $("progress-panel").hidden = true; }
-  catch (error) { crawl = { sources: [], targets: [], all: [], ignored: 0, columns: [] }; $("crawl-summary").hidden = true; $("crawl-file-status").textContent = error.message; $("crawl-file-status").className = "crawl-status error"; $("crawl-file").value = ""; }
+  try { crawl = parseCrawl(await decodeCsvFile(file)); renderSummary(file.name); $("message").textContent = ""; $("progress-panel").hidden = true; $("skipped-section").hidden = true; }
+  catch (error) { crawl = { sources: [], targets: [], all: [], ignored: 0, malformed: [], columns: [] }; $("crawl-summary").hidden = true; $("crawl-file-status").textContent = error.message; $("crawl-file-status").className = "crawl-status error"; $("crawl-file").value = ""; }
+}
+function renderSkippedUrls() {
+  const section = $("skipped-section");
+  section.hidden = crawl.malformed.length === 0;
+  if (section.hidden) return;
+  $("skipped-total").textContent = crawl.malformed.length.toLocaleString();
+  const visible = crawl.malformed.slice(0, 500);
+  $("skipped-results").innerHTML = visible.map(item => `<tr><td>${item.row}</td><td>${escapeHtml(item.url)}</td><td>${escapeHtml(item.status) || "—"}</td><td>${escapeHtml(item.reason)}</td></tr>`).join("");
+  $("skipped-note").textContent = crawl.malformed.length > visible.length ? `Showing the first ${visible.length.toLocaleString()} skipped rows. The downloaded CSV includes all ${crawl.malformed.length.toLocaleString()}.` : "These rows were excluded before matching so they could not stop the redirect analysis.";
 }
 function updateProgress(value, label) {
   const rounded = Math.max(0, Math.min(100, Math.round(value)));
@@ -208,8 +228,10 @@ async function mapPages() {
     updateProgress(97, "Rendering results…"); await yieldToBrowser();
     const visible = latest.slice(0, 500);
     $("results").innerHTML = visible.map(item => `<tr><td>${escapeHtml(item.source_url)}</td><td>${escapeHtml(item.destination_url) || "—"}</td><td class="score">${item.score}%</td><td>${escapeHtml(item.strongest_signal)}</td><td><span class="badge ${item.confidence}">${item.confidence}</span></td></tr>`).join("");
+    renderSkippedUrls();
     updateProgress(100, `Complete — ${latest.length.toLocaleString()} suggestions created`);
-    $("message").textContent = latest.length > visible.length ? `Showing the first ${visible.length.toLocaleString()} suggestions. Download CSV includes all ${latest.length.toLocaleString()}.` : `${latest.length.toLocaleString()} redirect suggestions created.`;
+    const skippedNote = crawl.malformed.length ? ` ${crawl.malformed.length.toLocaleString()} malformed URL${crawl.malformed.length === 1 ? " was" : "s were"} skipped and noted below.` : "";
+    $("message").textContent = (latest.length > visible.length ? `Showing the first ${visible.length.toLocaleString()} suggestions. Download CSV includes all ${latest.length.toLocaleString()}.` : `${latest.length.toLocaleString()} redirect suggestions created.`) + skippedNote;
     $("results-section").hidden = false; $("results-section").scrollIntoView({ behavior: "smooth" });
   } catch (error) {
     updateProgress(0, "Processing stopped"); $("message").textContent = `Could not create suggestions: ${error.message}`;
@@ -221,5 +243,5 @@ async function mapPages() {
 $("threshold").addEventListener("input", event => $("threshold-value").value = event.target.value);
 $("crawl-file").addEventListener("change", event => importCrawl(event.target.files[0]));
 $("map").addEventListener("click", () => mapPages());
-$("example").addEventListener("click", async () => { crawl = parseCrawl("URL,Status Code,Title 1,H1-1,Meta Description\nhttps://example.com/old/technical-seo-checklist,404,Technical SEO Checklist,Technical SEO Checklist,Audit your technical SEO\nhttps://example.com/products/blue-running-shoes,404,Blue Running Shoes,Blue Running Shoes,Lightweight shoes for runners\nhttps://example.com/resources/technical-seo-audit-checklist,200,Technical SEO Audit Checklist,Technical SEO Checklist,A complete technical audit guide\nhttps://example.com/products/mens-blue-running-shoe,200,Men's Blue Running Shoe,Blue Running Shoe,Lightweight blue shoes for runners"); renderSummary("example-crawl.csv"); await mapPages(); });
-$("download").addEventListener("click", () => { const columns = ["source_url", "source_status", "destination_url", "destination_status", "score", "strongest_signal", "confidence"]; const body = latest.map(item => columns.map(column => csvCell(item[column])).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([columns.join(",") + "\n" + body], { type: "text/csv" })); link.download = "redirect-map.csv"; link.click(); URL.revokeObjectURL(link.href); });
+$("example").addEventListener("click", async () => { crawl = parseCrawl("URL,Status Code,Title 1,H1-1,Meta Description\nhttps://example.com/old/technical-seo-checklist,404,Technical SEO Checklist,Technical SEO Checklist,Audit your technical SEO\nhttps://example.com/products/blue-running-shoes,404,Blue Running Shoes,Blue Running Shoes,Lightweight shoes for runners\nhttps://example.com/resources/technical-seo-audit-checklist,200,Technical SEO Audit Checklist,Technical SEO Checklist,A complete technical audit guide\nhttps://example.com/products/mens-blue-running-shoe,200,Men's Blue Running Shoe,Blue Running Shoe,Lightweight blue shoes for runners\nhttps://example.com/broken%ZZ-url,404,Broken URL,,"); renderSummary("example-crawl.csv"); await mapPages(); });
+$("download").addEventListener("click", () => { const columns = ["record_type", "source_url", "source_status", "destination_url", "destination_status", "score", "strongest_signal", "confidence", "csv_row", "notes"]; const suggestions = latest.map(item => ({ record_type: "redirect_suggestion", ...item, csv_row: "", notes: "" })); const skipped = crawl.malformed.map(item => ({ record_type: "skipped_malformed", source_url: item.url, source_status: item.status, destination_url: "", destination_status: "", score: "", strongest_signal: "", confidence: "skipped", csv_row: item.row, notes: item.reason })); const body = [...suggestions, ...skipped].map(item => columns.map(column => csvCell(item[column] ?? "")).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([columns.join(",") + "\n" + body], { type: "text/csv" })); link.download = "redirect-map.csv"; link.click(); URL.revokeObjectURL(link.href); });
