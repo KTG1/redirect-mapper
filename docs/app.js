@@ -3,8 +3,8 @@ let crawl = { sources: [], targets: [], all: [], ignored: 0, columns: [] };
 let latest = [];
 
 const ALIASES = {
-  url: ["url", "address", "page url", "page_url", "landing page", "source url", "source_url", "uri"],
-  status: ["status", "status code", "status_code", "http status", "http status code", "response code", "response_code", "statuscode"],
+  url: ["url", "address", "page", "page url", "page_url", "landing page", "source url", "source_url", "original url", "internal url", "uri"],
+  status: ["status", "status code", "status_code", "http status", "http status code", "response", "response code", "response_code", "http code", "statuscode"],
   title: ["title", "title 1", "title tag", "page title", "meta title"],
   h1: ["h1", "h1-1", "h1 1", "heading 1"],
   description: ["meta description", "description", "meta description 1"],
@@ -13,15 +13,27 @@ const ALIASES = {
 function normalizeHeader(value) { return value.replace(/^\ufeff/, "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "); }
 function columnIndex(headers, name) {
   const aliases = ALIASES[name].map(normalizeHeader);
-  return headers.findIndex(header => aliases.includes(header) || (name === "title" && header.startsWith("title ")) || (name === "h1" && /^h1(?:\s|$|-)/.test(header)));
+  const exact = headers.findIndex(header => aliases.includes(header));
+  if (exact >= 0) return exact;
+  if (name === "url") return headers.findIndex(header => /(^|\s)(url|uri|address)(\s|$)/.test(header));
+  if (name === "status") return headers.findIndex(header => /(^|\s)(status|response)(\s|$)/.test(header));
+  if (name === "title") return headers.findIndex(header => /(^|\s)title(\s|$)/.test(header));
+  if (name === "h1") return headers.findIndex(header => /^h\s*1(?:\s|$)/.test(header));
+  if (name === "description") return headers.findIndex(header => /(^|\s)description(\s|$)/.test(header));
+  return -1;
 }
 function detectDelimiter(text) {
-  const firstLine = text.split(/\r?\n/, 1)[0] || "";
-  const counts = { ",": 0, ";": 0, "\t": 0 }; let quoted = false;
-  for (let i = 0; i < firstLine.length; i++) {
-    if (firstLine[i] === '"' && firstLine[i + 1] === '"') i++;
-    else if (firstLine[i] === '"') quoted = !quoted;
-    else if (!quoted && Object.prototype.hasOwnProperty.call(counts, firstLine[i])) counts[firstLine[i]]++;
+  const declared = text.match(/^\ufeff?sep=(.)\r?\n/i);
+  if (declared) return declared[1];
+  const counts = { ",": 0, ";": 0, "\t": 0 };
+  for (const line of text.split(/\r?\n/).filter(Boolean).slice(0, 10)) {
+    const lineCounts = { ",": 0, ";": 0, "\t": 0 }; let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"' && line[i + 1] === '"') i++;
+      else if (line[i] === '"') quoted = !quoted;
+      else if (!quoted && Object.prototype.hasOwnProperty.call(lineCounts, line[i])) lineCounts[line[i]]++;
+    }
+    Object.keys(counts).forEach(delimiter => { counts[delimiter] = Math.max(counts[delimiter], lineCounts[delimiter]); });
   }
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
 }
@@ -45,11 +57,15 @@ function csvRows(text) {
 function parseCrawl(text) {
   const rows = csvRows(text);
   if (rows.length < 2) throw new Error("The CSV has no data rows.");
-  const headers = rows[0].map(normalizeHeader);
+  const headerRow = rows.slice(0, 20).findIndex(row => {
+    const candidate = row.map(normalizeHeader);
+    return columnIndex(candidate, "url") >= 0 && columnIndex(candidate, "status") >= 0;
+  });
+  const fallbackHeaders = rows[0].map(normalizeHeader).filter(Boolean);
+  if (headerRow < 0) throw new Error(`Could not identify URL and status columns. Found: ${fallbackHeaders.slice(0, 6).join(", ") || "no headers"}.`);
+  const headers = rows[headerRow].map(normalizeHeader);
   const indexes = Object.fromEntries(Object.keys(ALIASES).map(name => [name, columnIndex(headers, name)]));
-  if (indexes.url < 0) throw new Error("Could not find a URL column (for example URL or Address). ");
-  if (indexes.status < 0) throw new Error("Could not find a status-code column (for example Status Code). ");
-  const pages = rows.slice(1).map(columns => ({
+  const pages = rows.slice(headerRow + 1).map(columns => ({
     url: (columns[indexes.url] || "").trim(),
     status: Number.parseInt(((columns[indexes.status] || "").match(/\b[1-5]\d\d\b/) || [""])[0], 10),
     title: indexes.title >= 0 ? (columns[indexes.title] || "").trim() : "",
@@ -62,6 +78,17 @@ function parseCrawl(text) {
   if (!sources.length) throw new Error("No 404 or 410 rows were found.");
   if (!targets.length) throw new Error("No 2xx destination rows were found.");
   return { sources, targets, all: unique, ignored: unique.length - sources.length - targets.length, columns: Object.entries(indexes).filter(([, index]) => index >= 0).map(([name]) => name) };
+}
+async function decodeCsvFile(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
+  const sample = bytes.slice(0, 200);
+  const evenNulls = sample.filter((byte, index) => index % 2 === 0 && byte === 0).length;
+  const oddNulls = sample.filter((byte, index) => index % 2 === 1 && byte === 0).length;
+  if (oddNulls > sample.length / 8) return new TextDecoder("utf-16le").decode(bytes);
+  if (evenNulls > sample.length / 8) return new TextDecoder("utf-16be").decode(bytes);
+  return new TextDecoder("utf-8").decode(bytes);
 }
 function words(value) { return new Set((value.toLowerCase().match(/[a-z0-9]+/g) || []).filter(word => word.length > 1)); }
 function parts(page) {
@@ -110,7 +137,7 @@ function renderSummary(fileName) {
 }
 async function importCrawl(file) {
   if (!file) return;
-  try { crawl = parseCrawl(await file.text()); renderSummary(file.name); $("message").textContent = ""; }
+  try { crawl = parseCrawl(await decodeCsvFile(file)); renderSummary(file.name); $("message").textContent = ""; }
   catch (error) { crawl = { sources: [], targets: [], all: [], ignored: 0, columns: [] }; $("crawl-summary").hidden = true; $("crawl-file-status").textContent = error.message; $("crawl-file-status").className = "crawl-status error"; $("crawl-file").value = ""; }
 }
 function mapPages() {
