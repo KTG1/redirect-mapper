@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Map 404 URLs to relevant live pages with transparent fuzzy scoring.">
   <title>Redirect Mapper — SEO 404 recovery</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <header>
@@ -60,8 +60,8 @@
         <div><p class="eyebrow">Review</p><h2 id="results-title">Redirect candidates</h2></div>
         <button id="download" class="text-button" type="button">Download CSV</button>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>Broken URL</th><th>Best destination</th><th>Score</th><th>Strongest signal</th><th>Decision</th></tr></thead><tbody id="results"></tbody></table></div>
-      <p class="caution">Every 404/410 receives its closest live URL. A low score still needs manual review: similarity does not guarantee matching search intent.</p>
+      <div class="table-wrap"><table><thead><tr><th>Broken URL</th><th>Type</th><th>Best destination</th><th>Folder direction</th><th>Score</th><th>Strongest signal</th><th>Decision</th></tr></thead><tbody id="results"></tbody></table></div>
+      <p class="caution">Every 404/410 receives its closest live URL. Page URLs appear first; CSS, JS, and font files are grouped at the end. A low score still needs manual review.</p>
       <section id="skipped-section" class="skipped-section" hidden aria-labelledby="skipped-title">
         <h3 id="skipped-title">Skipped malformed URLs <span id="skipped-total">0</span></h3>
         <p id="skipped-note">These rows were excluded before matching so they could not stop the redirect analysis.</p>
@@ -70,6 +70,6 @@
     </section>
   </main>
   <footer><span>Open-source SEO utility</span><a href="https://github.com/KTG1/redirect-mapper" rel="noreferrer">View setup guide</a></footer>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

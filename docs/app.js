@@ -8,6 +8,7 @@ const ALIASES = {
   title: ["title", "title 1", "title tag", "page title", "meta title"],
   h1: ["h1", "h1-1", "h1 1", "heading 1"],
   description: ["meta description", "description", "meta description 1"],
+  content_type: ["content type", "mime type", "content-type", "contenttype"],
 };
 
 function normalizeHeader(value) { return value.replace(/^\ufeff/, "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "); }
@@ -76,7 +77,7 @@ function parseCrawl(text) {
       if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) throw new Error("Not an absolute HTTP(S) URL");
       decodeURIComponent(parsed.pathname);
       if (!Number.isFinite(status)) return;
-      pages.push({ url: rawUrl, status, title: indexes.title >= 0 ? (columns[indexes.title] || "").trim() : "", h1: indexes.h1 >= 0 ? (columns[indexes.h1] || "").trim() : "", description: indexes.description >= 0 ? (columns[indexes.description] || "").trim() : "" });
+      pages.push({ url: rawUrl, status, title: indexes.title >= 0 ? (columns[indexes.title] || "").trim() : "", h1: indexes.h1 >= 0 ? (columns[indexes.h1] || "").trim() : "", description: indexes.description >= 0 ? (columns[indexes.description] || "").trim() : "", content_type: indexes.content_type >= 0 ? (columns[indexes.content_type] || "").trim() : "" });
     } catch (error) {
       malformed.push({ row: headerRow + offset + 2, url: rawUrl, status: rawStatus, reason: error instanceof URIError ? "Invalid percent encoding" : "Invalid absolute HTTP(S) URL" });
     }
@@ -105,6 +106,20 @@ function parts(page) {
   const segments = path.split("/").filter(Boolean);
   return { host: parsed.hostname.replace(/^www\./, ""), path, segments, tokens: words(segments.join(" ")) };
 }
+function urlType(page) {
+  const contentType = (page.content_type || "").toLowerCase();
+  const pathname = new URL(page.url).pathname.toLowerCase();
+  if (contentType.includes("text/css") || /\.css(?:$|\/)/.test(pathname)) return "css";
+  if (/(javascript|ecmascript)/.test(contentType) || /\.(?:js|mjs|cjs)(?:$|\/)/.test(pathname)) return "js";
+  if (contentType.includes("font") || /\.(?:woff2?|ttf|otf|eot)(?:$|\/)/.test(pathname)) return "font";
+  if (contentType.startsWith("image/") || /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|\/)/.test(pathname)) return "image";
+  if (!contentType || contentType.includes("html") || /\.(?:html?|php)(?:$|\/)/.test(pathname)) return "html";
+  return "other";
+}
+function parentFolder(rawUrl) {
+  const segments = new URL(rawUrl).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  return segments.length > 1 ? `/${segments.slice(0, -1).join("/")}/` : "/";
+}
 function trigrams(value) {
   const clean = value.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (clean.length < 3) return new Set(clean ? [clean] : []);
@@ -120,13 +135,14 @@ function addIndex(index, key, targetIndex) {
   index.get(key).push(targetIndex);
 }
 function buildTargetIndex(targets) {
-  const targetParts = targets.map(parts), tokenIndex = new Map(), gramIndex = new Map(), directoryIndex = new Map();
+  const targetParts = targets.map(parts), tokenIndex = new Map(), gramIndex = new Map(), directoryIndex = new Map(), typeIndex = new Map();
   targetParts.forEach((targetPart, targetIndex) => {
     pageFeatures(targets[targetIndex], targetPart).forEach(token => addIndex(tokenIndex, token, targetIndex));
     trigrams(targetPart.segments.at(-1) || "").forEach(gram => addIndex(gramIndex, gram, targetIndex));
     addIndex(directoryIndex, targetPart.segments[0] || "", targetIndex);
+    addIndex(typeIndex, urlType(targets[targetIndex]), targetIndex);
   });
-  return { targetParts, tokenIndex, gramIndex, directoryIndex };
+  return { targetParts, tokenIndex, gramIndex, directoryIndex, typeIndex };
 }
 function candidateIndices(source, sourceParts, targetCount, index) {
   if (targetCount <= 2000) return Array.from({ length: targetCount }, (_, targetIndex) => targetIndex);
@@ -142,6 +158,11 @@ function candidateIndices(source, sourceParts, targetCount, index) {
     for (let targetIndex = 0; targetIndex < targetCount && selected.size < 250; targetIndex += step) selected.add(targetIndex);
   }
   return [...selected];
+}
+function typeSafeCandidates(source, candidates, index) {
+  const sourceType = urlType(source), matching = new Set(index.typeIndex.get(sourceType) || []);
+  const shortlisted = candidates.filter(targetIndex => matching.has(targetIndex));
+  return shortlisted.length ? shortlisted : [...matching].slice(0, 250).length ? [...matching].slice(0, 250) : candidates;
 }
 function similarity(a, b) {
   a = a.toLowerCase().trim(); b = b.toLowerCase().trim();
@@ -211,7 +232,7 @@ async function mapPages() {
     const index = buildTargetIndex(crawl.targets); updateProgress(6, `Matching ${crawl.sources.length.toLocaleString()} broken URLs…`); await yieldToBrowser();
     for (let sourceIndex = 0; sourceIndex < crawl.sources.length; sourceIndex++) {
       const source = crawl.sources[sourceIndex], sourceParts = parts(source);
-      const candidates = candidateIndices(source, sourceParts, crawl.targets.length, index);
+      const candidates = typeSafeCandidates(source, candidateIndices(source, sourceParts, crawl.targets.length, index), index);
       let best = null, runnerUp = null;
       for (const targetIndex of candidates) {
         const result = { target: crawl.targets[targetIndex], ...pageScore(source, crawl.targets[targetIndex], sourceParts, index.targetParts[targetIndex]) };
@@ -220,14 +241,17 @@ async function mapPages() {
       }
       const gap = best.score - (runnerUp?.score || 0), score = Math.round(best.score * 1000) / 10;
       const confidence = score < minimum ? "review" : score >= 78 && gap >= .08 ? "high" : score >= 60 ? "medium" : "low";
-      latest.push({ source_url: source.url, source_status: source.status, destination_url: best.target.url, destination_status: best.target.status, score, strongest_signal: best.strongest, confidence });
+      const sourceFolder = parentFolder(source.url), destinationFolder = parentFolder(best.target.url);
+      latest.push({ source_url: source.url, source_status: source.status, url_type: urlType(source), destination_url: best.target.url, destination_status: best.target.status, source_folder: sourceFolder, destination_folder: destinationFolder, folder_direction: `${sourceFolder} → ${destinationFolder}`, score, strongest_signal: best.strongest, confidence });
       if (sourceIndex % 5 === 0 || sourceIndex === crawl.sources.length - 1) {
         const complete = sourceIndex + 1; updateProgress(6 + 89 * complete / crawl.sources.length, `Matched ${complete.toLocaleString()} of ${crawl.sources.length.toLocaleString()} broken URLs…`); await yieldToBrowser();
       }
     }
     updateProgress(97, "Rendering results…"); await yieldToBrowser();
+    const typeOrder = { html: 0, image: 1, other: 2, css: 3, js: 4, font: 5 };
+    latest.sort((a, b) => typeOrder[a.url_type] - typeOrder[b.url_type]);
     const visible = latest.slice(0, 500);
-    $("results").innerHTML = visible.map(item => `<tr><td>${escapeHtml(item.source_url)}</td><td>${escapeHtml(item.destination_url) || "—"}</td><td class="score">${item.score}%</td><td>${escapeHtml(item.strongest_signal)}</td><td><span class="badge ${item.confidence}">${item.confidence}</span></td></tr>`).join("");
+    $("results").innerHTML = visible.map(item => `<tr><td>${escapeHtml(item.source_url)}</td><td><span class="type-badge ${item.url_type}">${item.url_type}</span></td><td>${escapeHtml(item.destination_url) || "—"}</td><td class="folder-direction">${escapeHtml(item.folder_direction)}</td><td class="score">${item.score}%</td><td>${escapeHtml(item.strongest_signal)}</td><td><span class="badge ${item.confidence}">${item.confidence}</span></td></tr>`).join("");
     renderSkippedUrls();
     updateProgress(100, `Complete — ${latest.length.toLocaleString()} suggestions created`);
     const skippedNote = crawl.malformed.length ? ` ${crawl.malformed.length.toLocaleString()} malformed URL${crawl.malformed.length === 1 ? " was" : "s were"} skipped and noted below.` : "";
@@ -243,5 +267,5 @@ async function mapPages() {
 $("threshold").addEventListener("input", event => $("threshold-value").value = event.target.value);
 $("crawl-file").addEventListener("change", event => importCrawl(event.target.files[0]));
 $("map").addEventListener("click", () => mapPages());
-$("example").addEventListener("click", async () => { crawl = parseCrawl("URL,Status Code,Title 1,H1-1,Meta Description\nhttps://example.com/old/technical-seo-checklist,404,Technical SEO Checklist,Technical SEO Checklist,Audit your technical SEO\nhttps://example.com/products/blue-running-shoes,404,Blue Running Shoes,Blue Running Shoes,Lightweight shoes for runners\nhttps://example.com/resources/technical-seo-audit-checklist,200,Technical SEO Audit Checklist,Technical SEO Checklist,A complete technical audit guide\nhttps://example.com/products/mens-blue-running-shoe,200,Men's Blue Running Shoe,Blue Running Shoe,Lightweight blue shoes for runners\nhttps://example.com/broken%ZZ-url,404,Broken URL,,"); renderSummary("example-crawl.csv"); await mapPages(); });
-$("download").addEventListener("click", () => { const columns = ["record_type", "source_url", "source_status", "destination_url", "destination_status", "score", "strongest_signal", "confidence", "csv_row", "notes"]; const suggestions = latest.map(item => ({ record_type: "redirect_suggestion", ...item, csv_row: "", notes: "" })); const skipped = crawl.malformed.map(item => ({ record_type: "skipped_malformed", source_url: item.url, source_status: item.status, destination_url: "", destination_status: "", score: "", strongest_signal: "", confidence: "skipped", csv_row: item.row, notes: item.reason })); const body = [...suggestions, ...skipped].map(item => columns.map(column => csvCell(item[column] ?? "")).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([columns.join(",") + "\n" + body], { type: "text/csv" })); link.download = "redirect-map.csv"; link.click(); URL.revokeObjectURL(link.href); });
+$("example").addEventListener("click", async () => { crawl = parseCrawl("URL,Status Code,Title 1,H1-1,Meta Description,Content Type\nhttps://example.com/old/technical-seo-checklist,404,Technical SEO Checklist,Technical SEO Checklist,Audit your technical SEO,text/html\nhttps://example.com/products/blue-running-shoes,404,Blue Running Shoes,Blue Running Shoes,Lightweight shoes for runners,text/html\nhttps://example.com/resources/technical-seo-audit-checklist,200,Technical SEO Audit Checklist,Technical SEO Checklist,A complete technical audit guide,text/html\nhttps://example.com/products/mens-blue-running-shoe,200,Men's Blue Running Shoe,Blue Running Shoe,Lightweight blue shoes for runners,text/html\nhttps://example.com/old-assets/site.css,404,,,,text/css\nhttps://example.com/assets/site.min.css,200,,,,text/css\nhttps://example.com/old-scripts/app.js,404,,,,application/javascript\nhttps://example.com/assets/app.min.js,200,,,,application/javascript\nhttps://example.com/old-fonts/brand.woff2,404,,,,font/woff2\nhttps://example.com/fonts/brand.woff2,200,,,,font/woff2\nhttps://example.com/broken%ZZ-url,404,Broken URL,,,text/html"); renderSummary("example-crawl.csv"); await mapPages(); });
+$("download").addEventListener("click", () => { const columns = ["record_type", "source_url", "source_status", "url_type", "destination_url", "destination_status", "source_folder", "destination_folder", "folder_direction", "score", "strongest_signal", "confidence", "csv_row", "notes"]; const suggestions = latest.map(item => ({ record_type: "redirect_suggestion", ...item, csv_row: "", notes: "" })); const skipped = crawl.malformed.map(item => ({ record_type: "skipped_malformed", source_url: item.url, source_status: item.status, url_type: "malformed", destination_url: "", destination_status: "", source_folder: "", destination_folder: "", folder_direction: "", score: "", strongest_signal: "", confidence: "skipped", csv_row: item.row, notes: item.reason })); const body = [...suggestions, ...skipped].map(item => columns.map(column => csvCell(item[column] ?? "")).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([columns.join(",") + "\n" + body], { type: "text/csv" })); link.download = "redirect-map.csv"; link.click(); URL.revokeObjectURL(link.href); });

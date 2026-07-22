@@ -33,6 +33,8 @@ Large crawls are processed in non-blocking batches. For datasets with more than 
 
 Malformed URLs are validated and skipped before indexing, including non-HTTP(S) values and invalid percent encoding. They are listed after the redirect results with their original CSV row and reason, and appended to the downloaded CSV as `record_type=skipped_malformed` records.
 
+URL types are inferred from file extensions and optional `Content Type`/`MIME Type` columns. CSS, JavaScript, and font redirects are matched against destinations of the same type and sorted after page-level results. The UI shows a compact folder transition such as `/old-section/ → /new-section/`; exports also include `source_folder`, `destination_folder`, and `folder_direction` columns.
+
 ## Production notes
 
 Prefer a single 301/308 hop directly to a canonical 200 URL. Avoid redirecting every missing page to the home page, soft-404 destinations, loops, and irrelevant matches. Preserve intentionally valuable query parameters and test generated rules in staging.
