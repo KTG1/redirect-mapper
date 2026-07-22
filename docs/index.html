@@ -16,40 +16,34 @@
     <section class="intro">
       <p class="eyebrow">404 recovery workbench</p>
       <h1>Give every lost URL<br><em>a relevant way home.</em></h1>
-      <p class="lede">Compare broken URLs with live destinations. Review the reasoning, keep uncertain matches out of production, then export a clean redirect map.</p>
+      <p class="lede">Upload one crawl export. The tool separates broken and live pages by status code, compares their URLs and metadata, then exports a review-ready redirect map.</p>
     </section>
 
     <section class="workbench" aria-labelledby="workbench-title">
       <div class="section-head">
         <div><p class="eyebrow">Input</p><h2 id="workbench-title">Build the map</h2></div>
-        <button id="example" class="text-button" type="button">Load example</button>
+        <button id="example" class="text-button" type="button">Use example crawl</button>
       </div>
-      <div class="inputs">
-        <div class="input-panel">
-          <div class="input-heading"><label for="sources">Broken URLs</label><span>One per line, or import a CSV</span></div>
-          <div class="upload-row">
-            <label class="upload-button" for="sources-file">Upload 404 CSV</label>
-            <input id="sources-file" class="file-input" type="file" accept=".csv,text/csv">
-            <span id="sources-file-status" class="file-status">No file selected</span>
-          </div>
-          <textarea id="sources" placeholder="https://example.com/old-page"></textarea>
-        </div>
-        <div class="route" aria-hidden="true"><span>404</span><i></i><b>301</b></div>
-        <div class="input-panel">
-          <div class="input-heading"><label for="targets">Live destinations</label><span>One canonical URL per line, or import a CSV</span></div>
-          <div class="upload-row">
-            <label class="upload-button" for="targets-file">Upload live CSV</label>
-            <input id="targets-file" class="file-input" type="file" accept=".csv,text/csv">
-            <span id="targets-file-status" class="file-status">No file selected</span>
-          </div>
-          <textarea id="targets" placeholder="https://example.com/new-page"></textarea>
+      <div class="crawl-upload">
+        <input id="crawl-file" class="file-input" type="file" accept=".csv,text/csv">
+        <label class="drop-zone" for="crawl-file">
+          <span class="file-mark">CSV</span>
+          <strong>Upload crawl export</strong>
+          <small>Requires URL and status code. Title, H1 and meta description improve suggestions.</small>
+        </label>
+        <p id="crawl-file-status" class="crawl-status">No crawl loaded</p>
+        <div id="crawl-summary" class="crawl-summary" hidden>
+          <span><b id="source-count">0</b> broken pages</span>
+          <i aria-hidden="true">→</i>
+          <span><b id="target-count">0</b> live destinations</span>
+          <span><b id="signal-count">0</b> metadata signals found</span>
         </div>
       </div>
       <div class="controls">
         <label class="threshold">Minimum score <output id="threshold-value">45</output>%
           <input id="threshold" type="range" min="20" max="90" value="45">
         </label>
-        <button id="map" class="primary" type="button">Find destinations</button>
+        <button id="map" class="primary" type="button">Create redirect suggestions</button>
       </div>
       <p id="message" class="message" role="status"></p>
     </section>
@@ -59,7 +53,7 @@
         <div><p class="eyebrow">Review</p><h2 id="results-title">Redirect candidates</h2></div>
         <button id="download" class="text-button" type="button">Download CSV</button>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>Broken URL</th><th>Best destination</th><th>Score</th><th>Decision</th></tr></thead><tbody id="results"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Broken URL</th><th>Best destination</th><th>Score</th><th>Strongest signal</th><th>Decision</th></tr></thead><tbody id="results"></tbody></table></div>
       <p class="caution">A matching score measures URL similarity—not search intent. Manually review every medium or low-confidence recommendation before deploying it.</p>
     </section>
   </main>

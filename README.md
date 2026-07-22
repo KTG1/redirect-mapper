@@ -27,7 +27,7 @@ Scores below the approval threshold are left without a destination. Close altern
 
 The `docs/` directory contains a private, browser-only version of the mapper. Enable **Settings → Pages → Deploy from branch**, select your default branch and `/docs`. CSV data never leaves the browser.
 
-The web interface accepts pasted URLs or direct CSV uploads for both 404 sources and live destinations. Uploaded files must contain a `url` column; quoted values and additional columns are supported.
+The web interface accepts one crawl-export CSV. It recognizes common crawler headers such as `URL` or `Address`, `Status Code`, `Title 1`, `H1-1`, and `Meta Description`. Rows with 404/410 statuses become redirect sources; 2xx rows become eligible destinations. URL structure is the primary matching signal, supported by title, H1, and description similarity when those columns are present.
 
 ## Production notes
 
