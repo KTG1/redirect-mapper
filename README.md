@@ -5,12 +5,15 @@ An SEO-focused Python tool that maps broken/404 URLs to the most relevant live U
 ## Quick start
 
 ```bash
+python3 url_redirect_mapper.py crawl examples/complete-crawl.csv -o redirect-map.csv
 python3 url_redirect_mapper.py map examples/404s.csv examples/live-urls.csv -o redirect-map.csv
 python3 url_redirect_mapper.py audit examples/live-urls.csv -o redirect-audit.csv
 python3 -m unittest discover -v
 ```
 
-Input CSVs require a `url` column. Add `title` for better relevance; destination files may include `status`. The output includes the total score and its path, slug, token, and title components.
+The recommended `crawl` command takes the same single crawl export as the web tool. It automatically separates 404/410 sources from 2xx destinations, prints progress, skips malformed URLs, groups CSS/JS/font records at the end, and writes folder-direction fields. It uses only the Python standard library.
+
+The older `map` command remains available for workflows that keep broken and live URLs in separate files.
 
 ## Scoring and SEO safeguards
 
